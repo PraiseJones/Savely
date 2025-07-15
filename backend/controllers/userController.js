@@ -1,116 +1,174 @@
 const supabase = require("../services/supabaseClient");
 const bcrypt = require("bcrypt");
-const validatePassword = require("../utils/validatePassword");
 const jwt = require("jsonwebtoken");
+const logger = require("../utils/logger");
 
-const registerUser = async (req, res) => {
-  const { name, phone, password } = req.body;
+const { registerSchema, loginSchema } = require("../validators/userValidator");
 
-  // Basic required field check
-  if (!name || !phone || !password) {
-    return res
-      .status(400)
-      .json({ error: "Name, phone, and password are required" });
+const registerUser = async (req, res, next) => {
+  try {
+    const { error: validationError, value } = registerSchema.validate(req.body);
+    if (validationError) {
+      return next({
+        statusCode: 400,
+        message: validationError.details[0].message,
+        error_code: "INVALID_INPUT"
+      });
+    }
+
+    const { name, phone, password } = value;
+
+    const { data: existingUser, error: findError } = await supabase
+      .from("Users")
+      .select("*")
+      .eq("phone", phone)
+      .single();
+
+    if (findError) {
+      logger.error(findError.message);
+      return next({
+        statusCode: 500,
+        message: "Something went wrong during registration",
+        error_code: "DB_ERROR"
+      });
+    }
+
+    if (existingUser) {
+      return next({
+        statusCode: 409,
+        message: "User already exists",
+        error_code: "USER_EXISTS"
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const { data, error } = await supabase
+      .from("Users")
+      .insert([{ name, phone, password: hashedPassword }])
+      .select()
+      .single();
+
+    if (error) {
+      logger.error(error.message);
+      return next({
+        statusCode: 500,
+        message: "Could not create user",
+        error_code: "REGISTRATION_FAILED"
+      });
+    }
+
+    await supabase.from("accounts").insert([
+      {
+        user_id: data.id,
+        balance: 0,
+        created_at: new Date().toISOString()
+      }
+    ]);
+
+    delete data.password;
+
+    return res.status(201).json({ user: data });
+  } catch (err) {
+    logger.error(err.stack);
+    next(err);
   }
-
-  // Password validation
-  const passwordError = validatePassword(password);
-  if (passwordError) {
-    return res.status(400).json({ error: passwordError });
-  }
-
-  // Check if user already exists
-  const { data: existingUser, error: findError } = await supabase
-    .from("Users")
-    .select("*")
-    .eq("phone", phone)
-    .single();
-
-  if (existingUser) {
-    return res
-      .status(409)
-      .json({ error: "User with this phone already exists" });
-  }
-
-  // Hash the password
-  const saltRounds = 10;
-  const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-  // Insert user
-  const { data, error } = await supabase
-    .from("Users")
-    .insert([{ name, phone, password: hashedPassword }])
-    .select()
-    .single();
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
-
-  await supabase.from('accounts').insert([
-    {
-      user_id: data.id,
-      balance: 0,
-      created_at: new Date().toISOString(),
-    },
-  ]);  
-
-  // Never return password
-  delete data.password;
-
-  return res.status(201).json({ user: data });
 };
 
-const loginUser = async (req, res) => {
-  const { phone, password } = req.body;
+const loginUser = async (req, res, next) => {
+  try {
+    const { error: validationError, value } = loginSchema.validate(req.body);
+    if (validationError) {
+      return next({
+        statusCode: 400,
+        message: validationError.details[0].message,
+        error_code: "INVALID_INPUT"
+      });
+    }
 
-  if (!phone || !password) {
-    return res.status(400).json({ error: "Phone and password are required" });
+    const { phone, password } = value;
+
+    const { data: user, error } = await supabase
+      .from("Users")
+      .select("*")
+      .eq("phone", phone)
+      .single();
+
+    if (error) {
+      logger.error(error.message);
+      return next({
+        statusCode: 500,
+        message: "Could not verify user",
+        error_code: "DB_ERROR"
+      });
+    }
+
+    if (!user) {
+      return next({
+        statusCode: 404,
+        message: "User not found",
+        error_code: "USER_NOT_FOUND"
+      });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return next({
+        statusCode: 401,
+        message: "Invalid password",
+        error_code: "WRONG_PASSWORD"
+      });
+    }
+
+    const payload = { id: user.id, phone: user.phone };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRES_IN
+    });
+
+    delete user.password;
+
+    return res.status(200).json({ user, token });
+  } catch (err) {
+    logger.error(err.stack);
+    next(err);
   }
-
-  const { data: user, error } = await supabase
-    .from("Users")
-    .select("*")
-    .eq("phone", phone)
-    .single();
-
-  if (error || !user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) {
-    return res.status(401).json({ error: "Invalid password" });
-  }
-
-  const payload = { id: user.id, phone: user.phone };
-
-  const token = jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN,
-  });
-
-  delete user.password;
-
-  return res.status(200).json({ user, token });
 };
 
-const getUser = async (req, res) => {
-  const { id } = req.params;
+const getUser = async (req, res, next) => {
+  try {
+    const { id } = req.params;
 
-  const { data, error } = await supabase
-    .from("Users")
-    .select("*")
-    .eq("id", id)
-    .single();
+    const { data, error } = await supabase
+      .from("Users")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-  if (error || !data) {
-    return res.status(404).json({ error: "User not found" });
+    if (error) {
+      logger.error(error.message);
+      return next({
+        statusCode: 500,
+        message: "Unable to fetch user",
+        error_code: "DB_ERROR"
+      });
+    }
+
+    if (!data) {
+      return next({
+        statusCode: 404,
+        message: "User not found",
+        error_code: "USER_NOT_FOUND"
+      });
+    }
+
+    if (data.password) delete data.password;
+
+    return res.status(200).json({ user: data });
+  } catch (err) {
+    logger.error(err.stack);
+    next(err);
   }
-
-  // Never return password
-  if (data.password) delete data.password;
-
-  return res.status(200).json({ user: data });
 };
 
 module.exports = { registerUser, loginUser, getUser };
