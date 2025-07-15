@@ -47,6 +47,14 @@ const registerUser = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
+  await supabase.from('accounts').insert([
+    {
+      user_id: data.id,
+      balance: 0,
+      created_at: new Date().toISOString(),
+    },
+  ]);  
+
   // Never return password
   delete data.password;
 
