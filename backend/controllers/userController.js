@@ -12,7 +12,7 @@ const registerUser = async (req, res, next) => {
       return next({
         statusCode: 400,
         message: validationError.details[0].message,
-        error_code: "INVALID_INPUT"
+        error_code: "INVALID_INPUT",
       });
     }
 
@@ -22,14 +22,14 @@ const registerUser = async (req, res, next) => {
       .from("Users")
       .select("*")
       .eq("phone", phone)
-      .single();
+      .maybeSingle();
 
     if (findError) {
       logger.error(findError.message);
       return next({
         statusCode: 500,
         message: "Something went wrong during registration",
-        error_code: "DB_ERROR"
+        error_code: "DB_ERROR",
       });
     }
 
@@ -37,7 +37,7 @@ const registerUser = async (req, res, next) => {
       return next({
         statusCode: 409,
         message: "User already exists",
-        error_code: "USER_EXISTS"
+        error_code: "USER_EXISTS",
       });
     }
 
@@ -46,29 +46,29 @@ const registerUser = async (req, res, next) => {
     const { data, error } = await supabase
       .from("Users")
       .insert([{ name, phone, password: hashedPassword }])
-      .select()
-      .single();
+      .select();
 
     if (error) {
       logger.error(error.message);
       return next({
         statusCode: 500,
         message: "Could not create user",
-        error_code: "REGISTRATION_FAILED"
+        error_code: "REGISTRATION_FAILED",
       });
     }
 
-    await supabase.from("accounts").insert([
+    const userData = data[0];
+
+    await supabase.from("wallets").insert([
       {
-        user_id: data.id,
+        user_id: userData.id,
         balance: 0,
-        created_at: new Date().toISOString()
-      }
+        created_at: new Date().toISOString(),
+      },
     ]);
 
-    delete data.password;
-
-    return res.status(201).json({ user: data });
+    delete userData.password;
+    return res.status(201).json({ user: userData });
   } catch (err) {
     logger.error(err.stack);
     next(err);
@@ -82,7 +82,7 @@ const loginUser = async (req, res, next) => {
       return next({
         statusCode: 400,
         message: validationError.details[0].message,
-        error_code: "INVALID_INPUT"
+        error_code: "INVALID_INPUT",
       });
     }
 
@@ -92,14 +92,14 @@ const loginUser = async (req, res, next) => {
       .from("Users")
       .select("*")
       .eq("phone", phone)
-      .single();
+      .maybeSingle();
 
     if (error) {
       logger.error(error.message);
       return next({
         statusCode: 500,
         message: "Could not verify user",
-        error_code: "DB_ERROR"
+        error_code: "DB_ERROR",
       });
     }
 
@@ -107,7 +107,7 @@ const loginUser = async (req, res, next) => {
       return next({
         statusCode: 404,
         message: "User not found",
-        error_code: "USER_NOT_FOUND"
+        error_code: "USER_NOT_FOUND",
       });
     }
 
@@ -116,14 +116,14 @@ const loginUser = async (req, res, next) => {
       return next({
         statusCode: 401,
         message: "Invalid password",
-        error_code: "WRONG_PASSWORD"
+        error_code: "WRONG_PASSWORD",
       });
     }
 
     const payload = { id: user.id, phone: user.phone };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN
+      expiresIn: process.env.JWT_EXPIRES_IN,
     });
 
     delete user.password;
@@ -143,14 +143,14 @@ const getUser = async (req, res, next) => {
       .from("Users")
       .select("*")
       .eq("id", id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       logger.error(error.message);
       return next({
         statusCode: 500,
         message: "Unable to fetch user",
-        error_code: "DB_ERROR"
+        error_code: "DB_ERROR",
       });
     }
 
@@ -158,7 +158,7 @@ const getUser = async (req, res, next) => {
       return next({
         statusCode: 404,
         message: "User not found",
-        error_code: "USER_NOT_FOUND"
+        error_code: "USER_NOT_FOUND",
       });
     }
 
