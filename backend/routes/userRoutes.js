@@ -22,22 +22,22 @@ router.get('/profile', authenticate, async (req, res) => {
   res.status(200).json({ user: data });
 });
 
-// Debug endpoint to list all users (remove in production)
-router.get('/debug/list', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('Users')
-      .select('id, name, phone, created_at');
+// remove in production
+// router.get('/debug/list', async (req, res) => {
+//   try {
+//     const { data, error } = await supabase
+//       .from('Users')
+//       .select('id, name, phone, created_at');
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
+//     if (error) {
+//       return res.status(500).json({ error: error.message });
+//     }
 
-    res.status(200).json({ users: data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+//     res.status(200).json({ users: data });
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 // Parameterized route should come last
 router.get('/:id', getUser);
